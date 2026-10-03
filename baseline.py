@@ -1,18 +1,24 @@
-import torch, qai_hub as hub
-from export_model import load, SEQ
+import os, time
+import numpy as np
+from data import encode, get_splits, tok, SEQ, ADD_SOS, ADD_EOS
 
-client = hub.Client()
-device = hub.Device("Samsung Galaxy S26 (Family)")
-model = load()
-x = torch.randint(0, 1000, (1, SEQ), dtype=torch.int32)
-ep = torch.export.export(model, (x,))
-specs = dict(tokens=((1, SEQ), "int32"))
+ckpt = "decoder_only.pt"
+print(f"checkpoint modified: {time.ctime(os.path.getmtime(ckpt))}")
+print(f"vocab size: {tok.vocab_size()}   ADD_SOS={ADD_SOS} ADD_EOS={ADD_EOS}")
 
-onnx_job = client.submit_compile_job(model=ep, device=device, input_specs=specs,
-                                     options="--target_runtime onnx")
-fp_job = client.submit_compile_job(model=ep, device=device, input_specs=specs,
-                                   options="--target_runtime qnn_dlc")
-prof = client.submit_profile_job(model=fp_job.get_target_model(), device=device)
+probe = ["lily", "timmy", "bunny", "puppy", "playground", "tom", "the", "happy"]
+print("probe words in vocab:", {w: (w in tok.word2idx) for w in probe})
 
-print("onnx model id:", onnx_job.get_target_model().model_id)
-print("profile:", prof.url)
+_, val = get_splits(n_calib=1, n_val=200)
+real = unk = 0
+lengths = []
+for s in val:
+    ids = encode(s)[0]
+    content = [i for i in ids if i not in (tok.PAD_ID, tok.SOS_ID, tok.EOS_ID)]
+    real += len(content)
+    unk += sum(1 for i in content if i == tok.UNK_ID)
+    lengths.append(len(content))
+
+print(f"UNK rate on val: {unk / real:.1%}   avg content tokens/sample: {np.mean(lengths):.1f}")
+print("\nsample decoded (what the model actually sees):")
+print(tok.decode_sentence([i for i in encode(val[0])[0] if i != tok.PAD_ID]))
